@@ -855,246 +855,723 @@ private:
     bool currentLightState = false;
     ControllerInterface* controller = nullptr; // Interface pointer
 
-    String makeMenu() {
-        String s = "<nav><ul class=\"primary\">";
-        s += makeLink("/", "Main", false); // Simplified menu
-        if (!wifi.isSettingMode()) {
-            s += makeLink("/control", "Control", false);
-            s += makeLink("/debug", "Debug", false);
-        }
-        s += makeLink("/settings", "Settings", false);
-        s += makeLink("/reboot", "Reboot", false);
-        if (wifi.isSettingMode()) {
-             s += makeLink("/reset", "Reset WiFi", false);
-        } else {
-             s += makeLink("/reset", "Reset All", false);
-        }
-        s += "</ul></nav>";
+    String makePageHeader(const String& title) {
+        String s = "<!DOCTYPE html><html><head><meta charset=\"utf-8\">";
+        s += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
+        s += "<title>" + config.hostname + " - " + title + "</title>";
+        // Include Bulma CSS framework from CDN
+        s += "<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css\">";
+        // Include Font Awesome for icons
+        s += "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css\">";
+        // Custom styles
+        s += "<style>.footer-card{margin-top:1rem} .box{margin-bottom:1rem} #toast{position:fixed;bottom:20px;right:20px;z-index:9999}</style>";
         return s;
     }
 
-    String makeLink(const String& href, const String& name, bool isDropdown) {
-        // Simplified link generation
-        return "<li><a href=\"" + href + "?t=" + String(millis()) + "\">" + name + "</a></li>";
-    }
-
-    String makePage(const String& title, const String& contents) {
-        String s = "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>";
-        s += config.hostname + " - " + title;
-        s += "</title><style>";
-        // Basic CSS (condensed from original)
-        s += "body{font-family:sans-serif;background:#eee;margin:0;}";
-        s += "nav ul{list-style:none;padding:0;margin:0;background:#333;} nav li{display:inline-block;} nav a{display:block;padding:10px 15px;color:#fff;text-decoration:none;} nav a:hover{background:#555;}";
-        s += ".wrap{max-width:800px;margin:20px auto;padding:20px;background:#fff;box-shadow:0 0 10px rgba(0,0,0,0.1);}";
-        s += "h1{color:#333;} pre{background:#f4f4f4;padding:10px;border:1px solid #ddd;overflow-x:auto;}";
-        s += "label{display:block;margin-top:10px;} input[type=text],input[type=password],select{width:100%;padding:8px;margin-top:5px;box-sizing:border-box;}";
-        s += "input[type=submit]{background:#333;color:#fff;padding:10px 15px;border:none;cursor:pointer;margin-top:15px;}";
-        s += "footer{text-align:center;margin-top:20px;font-size:0.8em;color:#777;}";
-        s += "</style>";
-        // Add jQuery if needed for specific pages like debug
-         if (title.indexOf("Debug") != -1) {
-             s += "<script src=\"https://code.jquery.com/jquery-3.6.0.min.js\"></script>";
-             s += "<script>$(document).ready(function(){var b=$('#jsonbuffer');if(b.length){try{var j=JSON.parse(b.text());b.text(JSON.stringify(j,null,2));}catch(e){console.error('Error parsing JSON:',e);}}});</script>";
-         }
-        s += "</head><body>";
-        s += makeMenu();
-        s += "<div class=\"wrap\"><h1>" + title + "</h1>";
-        s += contents;
-        s += "<footer>";
-        s += "Version: " + String(VERSION) + " | Host: " + config.hostname + " | Location: " + config.location + "<br>";
-        s += "Uptime: " + uptime_formatter::getUptime() + "<br>";
-        s += "WiFi: " + (wifi.isConnected() ? wifi.getSsid() + " (" + String(wifi.getRssi()) + " dBm) - " + IpAddress2String(wifi.getLocalIp()) : (wifi.isSettingMode() ? "Setup Mode AP" : "Disconnected")) + "<br>"; // Use wifi.isConnected()
-        s += String("MQTT: ") + String(mqtt.isConnected() ? "Connected" : "Disconnected") + "<br>"; // Fix string concatenation
-        s += "DHT Status: " + dht.getStatus() + " (T: " + String(dht.getTemperature(), 1) + "C, H: " + String(dht.getHumidity(), 1) + "%)<br>";
-        s += "</footer>";
-        s += "</div></body></html>";
+    String makeFooter() {
+        String s = "<footer class=\"footer p-3 is-size-7\">";
+        s += "<div class=\"content has-text-centered\">";
+        s += "<p><strong>" + config.hostname + "</strong> | Version: " + String(VERSION) + "</p>";
+        s += "<p>Uptime: <span id=\"uptime\">" + uptime_formatter::getUptime() + "</span></p>";
+        s += "<div class=\"columns is-mobile is-centered\">";
+        s += "<div class=\"column is-narrow\"><div class=\"card footer-card\"><div class=\"card-content p-2\">";
+        s += "<p class=\"has-text-centered\"><span class=\"icon\"><i class=\"fas fa-wifi\"></i></span> WiFi: <span id=\"wifi-status\">" + 
+             (wifi.isConnected() ? wifi.getSsid() + " (" + String(wifi.getRssi()) + " dBm)" : (wifi.isSettingMode() ? "Setup Mode" : "Disconnected")) + "</span></p>";
+        s += "</div></div></div>";
+        s += "<div class=\"column is-narrow\"><div class=\"card footer-card\"><div class=\"card-content p-2\">";
+        s += "<p class=\"has-text-centered\"><span class=\"icon\"><i class=\"fas fa-server\"></i></span> MQTT: <span id=\"mqtt-status\">" + 
+             String(mqtt.isConnected() ? "Connected" : "Disconnected") + "</span></p>";
+        s += "</div></div></div>";
+        s += "</div></div></footer>";
         return s;
     }
 
-    // --- Route Handlers ---
-    void handleRoot() {
-        String s = "<h2>Device Status</h2>";
-        s += "<p>Welcome to the " + config.hostname + " control panel.</p>";
-        s += "<p>Current Fan Speed: " + String(currentFanSpeed) + "</p>"; // Use stored value
-        s += String("<p>Light Status: ") + String(currentLightState ? "ON" : "OFF") + "</p>"; // Use stored value
-        s += "<p>Temperature: " + String(dht.getTemperature(), 1) + " &deg;C</p>";
-        s += "<p>Humidity: " + String(dht.getHumidity(), 1) + " %</p>";
-        if (wifi.isSettingMode()) {
-            s += "<p><b>Device is in Setup Mode.</b> Connect to the '" + config.hostname + "' WiFi network and go to <a href='/settings'>Settings</a> to configure.</p>";
-        }
-        server.send(200, "text/html", makePage("Main", s));
-    }
-
-    void handleControl() {
-         if (wifi.isSettingMode()) { handleRoot(); return; } // Redirect if in setup mode
-
-        String s = "<h2>Manual Control</h2>";
-        s += "<form method='get' action='/set_control'>";
-        // Fan Control
-        s += "<label for='fan_speed'>Fan Speed:</label>";
-        s += "<select name='fan_speed' id='fan_speed'>";
-        s += "<option value='0'" + String(currentFanSpeed == 0 ? " selected" : "") + ">Off</option>"; // Use stored value
-        s += "<option value='1'" + String(currentFanSpeed == 1 ? " selected" : "") + ">Speed 1</option>";
-        s += "<option value='2'" + String(currentFanSpeed == 2 ? " selected" : "") + ">Speed 2</option>";
-        s += "<option value='3'" + String(currentFanSpeed == 3 ? " selected" : "") + ">Speed 3</option>";
-        s += "</select><br>";
-        // Light Control
-        s += "<label for='light_state'>Light:</label>";
-        s += "<select name='light_state' id='light_state'>";
-        s += "<option value='0'" + String(!currentLightState ? " selected" : "") + ">Off</option>"; // Use stored value
-        s += "<option value='1'" + String(currentLightState ? " selected" : "") + ">On</option>";
-        s += "</select><br>";
-        s += "<input type='submit' value='Set Control'>";
-        s += "</form>";
-        server.send(200, "text/html", makePage("Control", s));
-    }
-
-     void handleSetControl() {
-        if (wifi.isSettingMode()) { handleRoot(); return; }
-
-        int fanSpeed = server.arg("fan_speed").toInt();
-        bool lightState = server.arg("light_state").toInt() == 1;
-
-        // Update stored values
-        currentFanSpeed = fanSpeed;
-        currentLightState = lightState;
+    String makeSPA() {
+        String s = makePageHeader("Control Panel");
         
-        // Use interface to update controller
-        if (controller) {
-            controller->setFanSpeed(fanSpeed, true);
-            controller->setLight(lightState);
+        // Add jQuery and custom JS script
+        s += "<script src=\"https://code.jquery.com/jquery-3.6.0.min.js\"></script>";
+        
+        // Start body
+        s += "</head><body>";
+        s += "<div id=\"toast\" class=\"notification is-success is-hidden\">Action completed</div>";
+        
+        // Top Navigation
+        s += "<nav class=\"navbar is-primary\" role=\"navigation\" aria-label=\"main navigation\">";
+        s += "<div class=\"navbar-brand\">";
+        s += "<a class=\"navbar-item\" href=\"#\">";
+        s += "<strong>" + config.hostname + "</strong>";
+        s += "</a>";
+        s += "<a role=\"button\" class=\"navbar-burger\" aria-label=\"menu\" aria-expanded=\"false\" data-target=\"navMenu\">";
+        s += "<span aria-hidden=\"true\"></span>";
+        s += "<span aria-hidden=\"true\"></span>";
+        s += "<span aria-hidden=\"true\"></span>";
+        s += "</a>";
+        s += "</div>";
+        s += "<div id=\"navMenu\" class=\"navbar-menu\">";
+        s += "<div class=\"navbar-start\">";
+        s += "<a class=\"navbar-item tab-link\" data-tab=\"main\"><span class=\"icon\"><i class=\"fas fa-home\"></i></span><span>Main</span></a>";
+        
+        if (!wifi.isSettingMode()) {
+            s += "<a class=\"navbar-item tab-link\" data-tab=\"control\"><span class=\"icon\"><i class=\"fas fa-sliders-h\"></i></span><span>Control</span></a>";
+            s += "<a class=\"navbar-item tab-link\" data-tab=\"debug\"><span class=\"icon\"><i class=\"fas fa-bug\"></i></span><span>Debug</span></a>";
+        }
+        
+        s += "<a class=\"navbar-item tab-link\" data-tab=\"settings\"><span class=\"icon\"><i class=\"fas fa-cog\"></i></span><span>Settings</span></a>";
+        s += "</div>";
+        s += "<div class=\"navbar-end\">";
+        s += "<div class=\"navbar-item\">";
+        s += "<div class=\"buttons\">";
+        s += "<a class=\"button is-danger is-light\" onclick=\"reboot()\"><span class=\"icon\"><i class=\"fas fa-power-off\"></i></span><span>Reboot</span></a>";
+        s += "<a class=\"button is-warning is-light\" onclick=\"resetConfig()\"><span class=\"icon\"><i class=\"fas fa-trash\"></i></span><span>" + 
+             (wifi.isSettingMode() ? "Reset WiFi" : "Reset All") + "</span></a>";
+        s += "</div></div></div></div>";
+        s += "</nav>";
+
+        // Main container
+        s += "<div class=\"container p-3\">";
+        
+        // Main tab content
+        s += "<div id=\"main-tab\" class=\"content-tab is-active\">";
+        s += "<div class=\"columns\">";
+        // Status column
+        s += "<div class=\"column is-half\">";
+        s += "<div class=\"box\">";
+        s += "<h3 class=\"title is-4\"><span class=\"icon\"><i class=\"fas fa-info-circle\"></i></span> Device Status</h3>";
+        s += "<table class=\"table is-fullwidth\">";
+        s += "<tr><td>Fan Speed</td><td id=\"status-fan\">" + String(currentFanSpeed) + "</td></tr>";
+        s += "<tr><td>Light</td><td id=\"status-light\">" + String(currentLightState ? "ON" : "OFF") + "</td></tr>";
+        s += "<tr><td>Temperature</td><td id=\"status-temp\">" + String(dht.getTemperature(), 1) + " °C</td></tr>";
+        s += "<tr><td>Humidity</td><td id=\"status-humidity\">" + String(dht.getHumidity(), 1) + " %</td></tr>";
+        s += "<tr><td>IP Address</td><td id=\"status-ip\">" + IpAddress2String(wifi.getLocalIp()) + "</td></tr>";
+        s += "</table>";
+        s += "</div>";
+        s += "</div>";
+        
+        // Quick control column
+        s += "<div class=\"column is-half\">";
+        s += "<div class=\"box\">";
+        s += "<h3 class=\"title is-4\"><span class=\"icon\"><i class=\"fas fa-bolt\"></i></span> Quick Controls</h3>";
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Light</label>";
+        s += "<div class=\"control\">";
+        s += "<div class=\"buttons has-addons\">";
+        s += "<button id=\"light-off-btn\" class=\"button " + String(!currentLightState ? "is-info is-selected" : "") + "\" onclick=\"setLight(false)\">OFF</button>";
+        s += "<button id=\"light-on-btn\" class=\"button " + String(currentLightState ? "is-info is-selected" : "") + "\" onclick=\"setLight(true)\">ON</button>";
+        s += "</div>";
+        s += "</div>";
+        s += "</div>";
+        
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Fan Speed</label>";
+        s += "<div class=\"control\">";
+        s += "<div class=\"buttons has-addons\">";
+        s += "<button id=\"fan-0-btn\" class=\"button " + String(currentFanSpeed == 0 ? "is-info is-selected" : "") + "\" onclick=\"setFan(0)\">OFF</button>";
+        s += "<button id=\"fan-1-btn\" class=\"button " + String(currentFanSpeed == 1 ? "is-info is-selected" : "") + "\" onclick=\"setFan(1)\">1</button>";
+        s += "<button id=\"fan-2-btn\" class=\"button " + String(currentFanSpeed == 2 ? "is-info is-selected" : "") + "\" onclick=\"setFan(2)\">2</button>";
+        s += "<button id=\"fan-3-btn\" class=\"button " + String(currentFanSpeed == 3 ? "is-info is-selected" : "") + "\" onclick=\"setFan(3)\">3</button>";
+        s += "</div>";
+        s += "</div>";
+        s += "</div>";
+        
+        if (wifi.isSettingMode()) {
+            s += "<div class=\"notification is-warning\">";
+            s += "<p><strong>Device is in Setup Mode.</strong> Please configure WiFi settings.</p>";
+            s += "</div>";
+        }
+        
+        s += "</div>";
+        s += "</div>";
+        s += "</div>";
+        s += "</div>";
+
+        // Control tab content
+        if (!wifi.isSettingMode()) {
+            s += "<div id=\"control-tab\" class=\"content-tab is-hidden\">";
+            s += "<div class=\"box\">";
+            s += "<h3 class=\"title is-4\"><span class=\"icon\"><i class=\"fas fa-sliders-h\"></i></span> Manual Control</h3>";
+            
+            s += "<div class=\"field\">";
+            s += "<label class=\"label\">Fan Speed</label>";
+            s += "<div class=\"control\">";
+            s += "<div class=\"select\">";
+            s += "<select id=\"fan-speed-select\">";
+            s += "<option value=\"0\"" + String(currentFanSpeed == 0 ? " selected" : "") + ">Off</option>";
+            s += "<option value=\"1\"" + String(currentFanSpeed == 1 ? " selected" : "") + ">Speed 1</option>";
+            s += "<option value=\"2\"" + String(currentFanSpeed == 2 ? " selected" : "") + ">Speed 2</option>";
+            s += "<option value=\"3\"" + String(currentFanSpeed == 3 ? " selected" : "") + ">Speed 3</option>";
+            s += "</select>";
+            s += "</div>";
+            s += "</div>";
+            s += "</div>";
+            
+            s += "<div class=\"field\">";
+            s += "<label class=\"label\">Light</label>";
+            s += "<div class=\"control\">";
+            s += "<div class=\"select\">";
+            s += "<select id=\"light-state-select\">";
+            s += "<option value=\"0\"" + String(!currentLightState ? " selected" : "") + ">Off</option>";
+            s += "<option value=\"1\"" + String(currentLightState ? " selected" : "") + ">On</option>";
+            s += "</select>";
+            s += "</div>";
+            s += "</div>";
+            s += "</div>";
+            
+            s += "<div class=\"field\">";
+            s += "<div class=\"control\">";
+            s += "<button class=\"button is-primary\" id=\"apply-settings\">Apply Settings</button>";
+            s += "</div>";
+            s += "</div>";
+            s += "</div>";
+            s += "</div>";
+
+            // Debug tab content
+            s += "<div id=\"debug-tab\" class=\"content-tab is-hidden\">";
+            s += "<div class=\"box\">";
+            s += "<h3 class=\"title is-4\"><span class=\"icon\"><i class=\"fas fa-bug\"></i></span> Debug Information</h3>";
+            s += "<h4 class=\"title is-5\">MQTT</h4>";
+            s += "<div class=\"table-container\">";
+            s += "<table class=\"table is-fullwidth is-striped\">";
+            s += "<tr><td>Status</td><td id=\"mqtt-connection-status\">" + String(mqtt.isConnected() ? "Connected" : "Disconnected") + "</td></tr>";
+            s += "<tr><td>Availability Topic</td><td>" + mqtt.getAvailabilityTopic() + "</td></tr>";
+            s += "<tr><td>State Topic</td><td>" + mqtt.getStateTopic() + "</td></tr>";
+            s += "<tr><td>Command Topic</td><td>" + mqtt.getCommandTopic() + "</td></tr>";
+            s += "<tr><td>JSON Report Topic</td><td>" + mqtt.getJsonReportTopic() + "</td></tr>";
+            s += "</table>";
+            s += "</div>";
+            
+            s += "<h4 class=\"title is-5\">MQTT Log <button class=\"button is-small is-light\" id=\"clear-mqtt-log\">Clear</button></h4>";
+            s += "<div class=\"notification\">";
+            s += "<pre id=\"mqtt-log\" style=\"max-height:200px;overflow:auto\">" + mqtt.getLog() + "</pre>";
+            s += "</div>";
+            
+            s += "<h4 class=\"title is-5\">DHT Sensor</h4>";
+            s += "<div class=\"table-container\">";
+            s += "<table class=\"table is-fullwidth is-striped\">";
+            s += "<tr><td>Status</td><td id=\"dht-status\">" + dht.getStatus() + "</td></tr>";
+            s += "<tr><td>Temperature</td><td id=\"dht-temp\">" + String(dht.getTemperature(), 2) + " °C</td></tr>";
+            s += "<tr><td>Humidity</td><td id=\"dht-hum\">" + String(dht.getHumidity(), 2) + " %</td></tr>";
+            s += "<tr><td>Last Read Time</td><td id=\"dht-read-time\">" + String(dht.getReadTimeMicros()) + " μs</td></tr>";
+            s += "<tr><td>Consecutive Errors</td><td id=\"dht-err\">" + String(dht.getErrorCount()) + "</td></tr>";
+            s += "<tr><td>Total Errors</td><td id=\"dht-total-err\">" + String(dht.getTotalErrorCount()) + "</td></tr>";
+            s += "</table>";
+            s += "</div>";
+            
+            s += "<h4 class=\"title is-5\">System</h4>";
+            s += "<div class=\"table-container\">";
+            s += "<table class=\"table is-fullwidth is-striped\">";
+            s += "<tr><td>Free Heap</td><td id=\"free-heap\">" + String(ESP.getFreeHeap()) + " bytes</td></tr>";
+            s += "<tr><td>Chip ID</td><td>" + String(ESP.getChipId(), HEX) + "</td></tr>";
+            s += "<tr><td>SDK Version</td><td>" + String(ESP.getSdkVersion()) + "</td></tr>";
+            s += "</table>";
+            s += "</div>";
+            s += "</div>";
+            s += "</div>";
+        }
+
+        // Settings tab content
+        s += "<div id=\"settings-tab\" class=\"content-tab is-hidden\">";
+        s += "<div class=\"box\">";
+        s += "<h3 class=\"title is-4\"><span class=\"icon\"><i class=\"fas fa-cog\"></i></span> Configuration Settings</h3>";
+        
+        // WiFi Settings
+        s += "<h4 class=\"title is-5\">WiFi</h4>";
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">SSID</label>";
+        s += "<div class=\"control\">";
+        
+        if (wifi.isSettingMode()) {
+            s += "<div class=\"select is-fullwidth\">";
+            s += "<select id=\"ssid\">" + wifi.getSsidListHtml() + "</select>";
+            s += "</div>";
+        } else {
+            s += "<input class=\"input\" type=\"text\" id=\"ssid\" value=\"" + config.ssid + "\">";
+        }
+        
+        s += "</div>";
+        s += "</div>";
+        
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Password</label>";
+        s += "<div class=\"control\">";
+        s += "<input class=\"input\" type=\"password\" id=\"pass\" value=\"" + config.pass + "\">";
+        s += "</div>";
+        s += "</div>";
+        
+        // Device Settings
+        s += "<h4 class=\"title is-5\">Device</h4>";
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Hostname</label>";
+        s += "<div class=\"control\">";
+        s += "<input class=\"input\" type=\"text\" id=\"hostname\" value=\"" + config.hostname + "\">";
+        s += "</div>";
+        s += "</div>";
+        
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Location (for MQTT topic)</label>";
+        s += "<div class=\"control\">";
+        s += "<input class=\"input\" type=\"text\" id=\"location\" value=\"" + config.location + "\">";
+        s += "</div>";
+        s += "</div>";
+        
+        // MQTT Settings
+        s += "<h4 class=\"title is-5\">MQTT</h4>";
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Server</label>";
+        s += "<div class=\"control\">";
+        s += "<input class=\"input\" type=\"text\" id=\"mqtt_server\" value=\"" + config.mqtt_server + "\">";
+        s += "</div>";
+        s += "</div>";
+        
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Port</label>";
+        s += "<div class=\"control\">";
+        s += "<input class=\"input\" type=\"text\" id=\"mqtt_port\" value=\"" + config.mqtt_port + "\">";
+        s += "</div>";
+        s += "</div>";
+        
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Use Authentication</label>";
+        s += "<div class=\"control\">";
+        s += "<div class=\"select\">";
+        s += "<select id=\"mqtt_auth\">";
+        s += "<option value=\"false\"" + String(!config.mqtt_auth ? " selected" : "") + ">No</option>";
+        s += "<option value=\"true\"" + String(config.mqtt_auth ? " selected" : "") + ">Yes</option>";
+        s += "</select>";
+        s += "</div>";
+        s += "</div>";
+        s += "</div>";
+        
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Username</label>";
+        s += "<div class=\"control\">";
+        s += "<input class=\"input\" type=\"text\" id=\"mqtt_user\" value=\"" + config.mqtt_user + "\">";
+        s += "</div>";
+        s += "</div>";
+        
+        s += "<div class=\"field\">";
+        s += "<label class=\"label\">Password</label>";
+        s += "<div class=\"control\">";
+        s += "<input class=\"input\" type=\"password\" id=\"mqtt_password\" value=\"" + config.mqtt_password + "\">";
+        s += "</div>";
+        s += "</div>";
+        
+        s += "<div class=\"field\">";
+        s += "<div class=\"control\">";
+        s += "<button class=\"button is-primary\" id=\"save-settings\">Save Settings & Reboot</button>";
+        s += "</div>";
+        s += "</div>";
+        
+        s += "</div>";
+        s += "</div>";
+        
+        // End container
+        s += "</div>";
+        
+        // Add footer
+        s += makeFooter();
+        
+        // Add JavaScript for SPA functionality
+        s += "<script>";
+        
+        // Tab handling
+        s += "document.addEventListener('DOMContentLoaded', function() {";
+        s += "  // Tab handling";
+        s += "  const tabLinks = document.querySelectorAll('.tab-link');";
+        s += "  tabLinks.forEach(link => {";
+        s += "    link.addEventListener('click', () => {";
+        s += "      const tabId = link.getAttribute('data-tab');";
+        s += "      document.querySelectorAll('.content-tab').forEach(tab => {";
+        s += "        tab.classList.add('is-hidden');";
+        s += "      });";
+        s += "      document.querySelectorAll('.tab-link').forEach(tab => {";
+        s += "        tab.classList.remove('is-active');";
+        s += "      });";
+        s += "      document.getElementById(tabId + '-tab').classList.remove('is-hidden');";
+        s += "      link.classList.add('is-active');";
+        s += "    });";
+        s += "  });";
+        
+        // Mobile menu toggle
+        s += "  // Mobile menu";
+        s += "  const burger = document.querySelector('.navbar-burger');";
+        s += "  burger.addEventListener('click', () => {";
+        s += "    const target = document.getElementById(burger.dataset.target);";
+        s += "    burger.classList.toggle('is-active');";
+        s += "    target.classList.toggle('is-active');";
+        s += "  });";
+        
+        // Button handlers
+        s += "  // Event handlers";
+        s += "  const saveSettingsBtn = document.getElementById('save-settings');";
+        s += "  if (saveSettingsBtn) {";
+        s += "    saveSettingsBtn.addEventListener('click', saveSettings);";
+        s += "  }";
+        s += "  const applyBtn = document.getElementById('apply-settings');";
+        s += "  if (applyBtn) {";
+        s += "    applyBtn.addEventListener('click', applySettings);";
+        s += "  }";
+        s += "  const clearLogBtn = document.getElementById('clear-mqtt-log');";
+        s += "  if (clearLogBtn) {";
+        s += "    clearLogBtn.addEventListener('click', clearMqttLog);";
+        s += "  }";
+        
+        // Set up periodic data updates
+        s += "  // Periodic updates";
+        s += "  setInterval(updateData, 2000);";
+        s += "});";
+        
+        // AJAX Functions
+        s += "function updateData() {";
+        s += "  fetch('/api/status')";
+        s += "    .then(response => response.json())";
+        s += "    .then(data => {";
+        s += "      document.getElementById('status-fan').textContent = data.fan_speed;";
+        s += "      document.getElementById('status-light').textContent = data.light ? 'ON' : 'OFF';";
+        s += "      document.getElementById('status-temp').textContent = data.temperature.toFixed(1) + ' °C';";
+        s += "      document.getElementById('status-humidity').textContent = data.humidity.toFixed(1) + ' %';";
+        s += "      document.getElementById('status-ip').textContent = data.wifi.ip;";
+        s += "      document.getElementById('wifi-status').textContent = data.wifi.ssid + ' (' + data.wifi.rssi + ' dBm)';";
+        s += "      document.getElementById('mqtt-status').textContent = data.mqtt_connected ? 'Connected' : 'Disconnected';";
+        s += "      document.getElementById('uptime').textContent = data.uptime;";
+        
+        // Update debug info if available
+        s += "      if (document.getElementById('dht-status')) {";
+        s += "        document.getElementById('dht-status').textContent = data.dht.status;";
+        s += "        document.getElementById('dht-temp').textContent = data.temperature.toFixed(2) + ' °C';";
+        s += "        document.getElementById('dht-hum').textContent = data.humidity.toFixed(2) + ' %';";
+        s += "        document.getElementById('dht-read-time').textContent = data.dht.read_time + ' μs';";
+        s += "        document.getElementById('dht-err').textContent = data.dht.error_count;";
+        s += "        document.getElementById('dht-total-err').textContent = data.dht.total_error_count;";
+        s += "        document.getElementById('free-heap').textContent = data.free_heap + ' bytes';";
+        s += "        document.getElementById('mqtt-connection-status').textContent = data.mqtt_connected ? 'Connected' : 'Disconnected';";
+        s += "        document.getElementById('mqtt-log').textContent = data.mqtt_log;";
+        s += "      }";
+        
+        // Update button states
+        s += "      updateButtonStates(data.fan_speed, data.light);";
+        s += "    })";
+        s += "    .catch(error => console.error('Error updating data:', error));";
+        s += "}";
+        
+        s += "function updateButtonStates(fanSpeed, lightOn) {";
+        s += "  // Update fan buttons";
+        s += "  for (let i = 0; i <= 3; i++) {";
+        s += "    const btn = document.getElementById('fan-' + i + '-btn');";
+        s += "    if (btn) {";
+        s += "      if (i === fanSpeed) {";
+        s += "        btn.classList.add('is-info', 'is-selected');";
+        s += "      } else {";
+        s += "        btn.classList.remove('is-info', 'is-selected');";
+        s += "      }";
+        s += "    }";
+        s += "  }";
+        
+        s += "  // Update light buttons";
+        s += "  const lightOffBtn = document.getElementById('light-off-btn');";
+        s += "  const lightOnBtn = document.getElementById('light-on-btn');";
+        s += "  if (lightOffBtn && lightOnBtn) {";
+        s += "    if (lightOn) {";
+        s += "      lightOnBtn.classList.add('is-info', 'is-selected');";
+        s += "      lightOffBtn.classList.remove('is-info', 'is-selected');";
+        s += "    } else {";
+        s += "      lightOffBtn.classList.add('is-info', 'is-selected');";
+        s += "      lightOnBtn.classList.remove('is-info', 'is-selected');";
+        s += "    }";
+        s += "  }";
+        
+        s += "  // Update select controls too";
+        s += "  const fanSelect = document.getElementById('fan-speed-select');";
+        s += "  const lightSelect = document.getElementById('light-state-select');";
+        s += "  if (fanSelect) fanSelect.value = fanSpeed;";
+        s += "  if (lightSelect) lightSelect.value = lightOn ? '1' : '0';";
+        s += "}";
+
+        // Control functions
+        s += "function setFan(speed) {";
+        s += "  fetch('/api/control?fan=' + speed)";
+        s += "    .then(response => response.json())";
+        s += "    .then(data => {";
+        s += "      showToast('Fan speed set to ' + speed);";
+        s += "      updateButtonStates(data.fan_speed, data.light);";
+        s += "    });";
+        s += "}";
+
+        s += "function setLight(state) {";
+        s += "  fetch('/api/control?light=' + (state ? '1' : '0'))";
+        s += "    .then(response => response.json())";
+        s += "    .then(data => {";
+        s += "      showToast('Light turned ' + (state ? 'ON' : 'OFF'));";
+        s += "      updateButtonStates(data.fan_speed, data.light);";
+        s += "    });";
+        s += "}";
+
+        s += "function applySettings() {";
+        s += "  const fanSpeed = document.getElementById('fan-speed-select').value;";
+        s += "  const lightState = document.getElementById('light-state-select').value === '1';";
+        s += "  fetch(`/api/control?fan=${fanSpeed}&light=${lightState ? '1' : '0'}`)";
+        s += "    .then(response => response.json())";
+        s += "    .then(data => {";
+        s += "      showToast('Settings applied');";
+        s += "      updateButtonStates(data.fan_speed, data.light);";
+        s += "    });";
+        s += "}";
+
+        s += "function saveSettings() {";
+        s += "  const data = {";
+        s += "    ssid: document.getElementById('ssid').value,";
+        s += "    pass: document.getElementById('pass').value,";
+        s += "    hostname: document.getElementById('hostname').value,";
+        s += "    location: document.getElementById('location').value,";
+        s += "    mqtt_server: document.getElementById('mqtt_server').value,";
+        s += "    mqtt_port: document.getElementById('mqtt_port').value,";
+        s += "    mqtt_auth: document.getElementById('mqtt_auth').value,";
+        s += "    mqtt_user: document.getElementById('mqtt_user').value,";
+        s += "    mqtt_password: document.getElementById('mqtt_password').value";
+        s += "  };";
+        s += "  fetch('/api/settings', {";
+        s += "    method: 'POST',";
+        s += "    headers: {'Content-Type': 'application/json'},";
+        s += "    body: JSON.stringify(data)";
+        s += "  })";
+        s += "  .then(response => response.json())";
+        s += "  .then(data => {";
+        s += "    if (data.success) {";
+        s += "      showToast('Settings saved. Device will reboot.');";
+        s += "      setTimeout(() => { window.location.reload(); }, 5000);";
+        s += "    } else {";
+        s += "      showToast('Error saving settings', 'is-danger');";
+        s += "    }";
+        s += "  });";
+        s += "}";
+
+        s += "function clearMqttLog() {";
+        s += "  fetch('/api/clear_log')";
+        s += "    .then(response => response.json())";
+        s += "    .then(data => {";
+        s += "      document.getElementById('mqtt-log').textContent = '';";
+        s += "      showToast('Log cleared');";
+        s += "    });";
+        s += "}";
+
+        s += "function reboot() {";
+        s += "  if (confirm('Are you sure you want to reboot the device?')) {";
+        s += "    fetch('/api/reboot')";
+        s += "      .then(() => {";
+        s += "        showToast('Rebooting...');";
+        s += "        setTimeout(() => { window.location.reload(); }, 10000);";
+        s += "      });";
+        s += "  }";
+        s += "}";
+
+        s += "function resetConfig() {";
+        s += "  if (confirm('Are you sure you want to reset all settings?')) {";
+        s += "    fetch('/api/reset')";
+        s += "      .then(() => {";
+        s += "        showToast('Resetting configuration...');";
+        s += "        setTimeout(() => { window.location.reload(); }, 10000);";
+        s += "      });";
+        s += "  }";
+        s += "}";
+
+        s += "function showToast(message, type = 'is-success') {";
+        s += "  const toast = document.getElementById('toast');";
+        s += "  toast.className = 'notification ' + type;";
+        s += "  toast.textContent = message;";
+        s += "  toast.classList.remove('is-hidden');";
+        s += "  setTimeout(() => { toast.classList.add('is-hidden'); }, 3000);";
+        s += "}";
+
+        s += "</script>";
+        
+        s += "</body></html>";
+        return s;
+    }
+
+    // --- API Route Handlers ---
+    void handleApiStatus() {
+        // DynamicJsonDocument doc(1024);
+        JsonDocument doc;
+
+        doc["temperature"] = dht.getTemperature();
+        doc["humidity"] = dht.getHumidity();
+        doc["fan_speed"] = currentFanSpeed;
+        doc["light"] = currentLightState;
+        doc["mqtt_connected"] = mqtt.isConnected();
+        doc["uptime"] = uptime_formatter::getUptime();
+        doc["free_heap"] = ESP.getFreeHeap();
+        
+        // WiFi info
+        JsonObject wifiObj = doc["wifi"].to<JsonObject>();
+        wifiObj["ssid"] = wifi.getSsid();
+        wifiObj["ip"] = IpAddress2String(wifi.getLocalIp());
+        wifiObj["rssi"] = wifi.getRssi();
+        
+        // DHT info
+        JsonObject dhtObj = doc["dht"].to<JsonObject>();
+        dhtObj["status"] = dht.getStatus();
+        dhtObj["read_time"] = dht.getReadTimeMicros();
+        dhtObj["error_count"] = dht.getErrorCount();
+        dhtObj["total_error_count"] = dht.getTotalErrorCount();
+        
+        // MQTT log in debug mode
+        doc["mqtt_log"] = mqtt.getLog();
+        
+        String jsonResponse;
+        serializeJson(doc, jsonResponse);
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.send(200, "application/json", jsonResponse);
+    }
+
+    void handleApiControl() {
+        bool changed = false;
+        
+        if (server.hasArg("fan")) {
+            int fanSpeed = server.arg("fan").toInt();
+            if (fanSpeed >= 0 && fanSpeed <= 3 && controller) {
+                controller->setFanSpeed(fanSpeed, true);
+                currentFanSpeed = fanSpeed;
+                changed = true;
+            }
+        }
+        
+        if (server.hasArg("light")) {
+            bool lightState = server.arg("light").toInt() == 1;
+            if (controller) {
+                controller->setLight(lightState);
+                currentLightState = lightState;
+                changed = true;
+            }
+        }
+        
+        if (changed && controller) {
             controller->reportState();
         }
-
-        String s = "<h2>Control Updated</h2>";
-        s += "<p>Fan speed set to: " + String(fanSpeed) + "</p>";
-        s += String("<p>Light state set to: ") + String(lightState ? "ON" : "OFF") + "</p>"; // Fix string concatenation 
-        s += "<p><a href='/control'>Back to Control</a></p>";
-        s += "<p><a href='/'>Back to Main</a></p>";
-        server.send(200, "text/html", makePage("Control Set", s));
+        
+        // DynamicJsonDocument doc(256);
+        JsonDocument doc;
+        doc["success"] = true;
+        doc["fan_speed"] = currentFanSpeed;
+        doc["light"] = currentLightState;
+        
+        String jsonResponse;
+        serializeJson(doc, jsonResponse);
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.send(200, "application/json", jsonResponse);
     }
 
-
-    void handleSettings() {
-        String s = "<h2>Configuration Settings</h2>";
-        s += "<form method='get' action='/save_settings'>";
-
-        // WiFi Settings
-        s += "<h3>WiFi</h3>";
-        s += "<label for='ssid'>SSID:</label>";
-        if (wifi.isSettingMode()) {
-             s += "<select name='ssid' id='ssid'>" + wifi.getSsidListHtml() + "</select><br>";
+    void handleApiSettings() {
+        if (server.hasArg("plain")) { // Content sent as application/json
+            String json = server.arg("plain");
+            // DynamicJsonDocument doc(1024);
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, json);
+            
+            if (!error) {
+                String ssid_val = doc["ssid"].as<String>();
+                String pass_val = doc["pass"].as<String>();
+                String host_val = doc["hostname"].as<String>();
+                String loc_val = doc["location"].as<String>();
+                String mqtt_srv_val = doc["mqtt_server"].as<String>();
+                String mqtt_port_val = doc["mqtt_port"].as<String>();
+                String mqtt_auth_val = doc["mqtt_auth"].as<String>();
+                String mqtt_user_val = doc["mqtt_user"].as<String>();
+                String mqtt_pass_val = doc["mqtt_password"].as<String>();
+                
+                config.save(ssid_val, pass_val, host_val, loc_val, mqtt_srv_val, mqtt_port_val, 
+                           mqtt_auth_val, mqtt_user_val, mqtt_pass_val);
+                
+                // DynamicJsonDocument response(128);
+                JsonDocument response;
+                response["success"] = true;
+                response["message"] = "Settings saved. Device will reboot.";
+                String jsonResponse;
+                serializeJson(response, jsonResponse);
+                
+                server.sendHeader("Access-Control-Allow-Origin", "*");
+                server.send(200, "application/json", jsonResponse);
+                
+                delay(1000);
+                ESP.restart();
+            } else {
+                // DynamicJsonDocument response(128);
+                JsonDocument response;
+                response["success"] = false;
+                response["message"] = "JSON parsing error";
+                String jsonResponse;
+                serializeJson(response, jsonResponse);
+                
+                server.sendHeader("Access-Control-Allow-Origin", "*");
+                server.send(400, "application/json", jsonResponse);
+            }
         } else {
-             s += "<input type='text' name='ssid' id='ssid' value='" + config.ssid + "'><br>";
+            // DynamicJsonDocument response(128);
+            JsonDocument response;
+            response["success"] = false;
+            response["message"] = "No JSON data received";
+            String jsonResponse;
+            serializeJson(response, jsonResponse);
+            
+            server.sendHeader("Access-Control-Allow-Origin", "*");
+            server.send(400, "application/json", jsonResponse);
         }
-        s += "<label for='pass'>Password:</label>";
-        s += "<input type='password' name='pass' id='pass' value='" + config.pass + "'><br>";
-
-        // Device Settings
-        s += "<h3>Device</h3>";
-        s += "<label for='hostname'>Hostname:</label>";
-        s += "<input type='text' name='hostname' id='hostname' value='" + config.hostname + "'><br>";
-        s += "<label for='location'>Location (for MQTT topic):</label>";
-        s += "<input type='text' name='location' id='location' value='" + config.location + "'><br>";
-
-        // MQTT Settings
-        s += "<h3>MQTT</h3>";
-        s += "<label for='mqtt_server'>Server:</label>";
-        s += "<input type='text' name='mqtt_server' id='mqtt_server' value='" + config.mqtt_server + "'><br>";
-        s += "<label for='mqtt_port'>Port:</label>";
-        s += "<input type='text' name='mqtt_port' id='mqtt_port' value='" + config.mqtt_port + "'><br>";
-        s += "<label for='mqtt_auth'>Use Authentication:</label>";
-        s += "<select name='mqtt_auth' id='mqtt_auth'>";
-        s += "<option value='false'" + String(!config.mqtt_auth ? " selected" : "") + ">No</option>";
-        s += "<option value='true'" + String(config.mqtt_auth ? " selected" : "") + ">Yes</option>";
-        s += "</select><br>";
-        s += "<label for='mqtt_user'>Username:</label>";
-        s += "<input type='text' name='mqtt_user' id='mqtt_user' value='" + config.mqtt_user + "'><br>";
-        s += "<label for='mqtt_password'>Password:</label>";
-        s += "<input type='password' name='mqtt_password' id='mqtt_password' value='" + config.mqtt_password + "'><br>";
-
-        s += "<input type='submit' value='Save Settings & Reboot'>";
-        s += "</form>";
-        server.send(200, "text/html", makePage("Settings", s));
     }
 
-    void handleSaveSettings() {
-        String ssid_val = urlDecode(server.arg("ssid"));
-        String pass_val = urlDecode(server.arg("pass"));
-        String host_val = urlDecode(server.arg("hostname"));
-        String loc_val = urlDecode(server.arg("location"));
-        String mqtt_srv_val = urlDecode(server.arg("mqtt_server"));
-        String mqtt_port_val = urlDecode(server.arg("mqtt_port"));
-        String mqtt_auth_val = urlDecode(server.arg("mqtt_auth"));
-        String mqtt_user_val = urlDecode(server.arg("mqtt_user"));
-        String mqtt_pass_val = urlDecode(server.arg("mqtt_password"));
-
-        config.save(ssid_val, pass_val, host_val, loc_val, mqtt_srv_val, mqtt_port_val, mqtt_auth_val, mqtt_user_val, mqtt_pass_val);
-
-        String s = "<h2>Settings Saved</h2>";
-        s += "<p>Configuration has been saved to EEPROM.</p>";
-        s += "<p>The device will now reboot to apply the changes.</p>";
-        server.send(200, "text/html", makePage("Settings Saved", s));
-        delay(2000);
-        ESP.restart();
-    }
-
-    void handleReset() {
-        config.clear();
-        String s = "<h2>Configuration Reset</h2>";
-        s += "<p>All settings have been cleared from EEPROM.</p>";
-        s += "<p>The device will now reboot into Setup Mode.</p>";
-        server.send(200, "text/html", makePage("Reset", s));
-        delay(2000);
-        ESP.restart();
-    }
-
-    void handleReboot() {
-        String s = "<h2>Rebooting</h2>";
-        s += "<p>The device will reboot shortly.</p>";
-        server.send(200, "text/html", makePage("Reboot", s));
+    void handleApiReboot() {
+        // DynamicJsonDocument doc(128);
+        JsonDocument doc;
+        doc["success"] = true;
+        doc["message"] = "Rebooting...";
+        
+        String jsonResponse;
+        serializeJson(doc, jsonResponse);
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.send(200, "application/json", jsonResponse);
+        
         delay(1000);
         ESP.restart();
     }
 
-     void handleDebug() {
-        if (wifi.isSettingMode()) { handleRoot(); return; }
-
-        String s = "<h2>Debug Information</h2>";
-        s += "<h3>MQTT</h3>";
-        s += "<p>Status: " + String(mqtt.isConnected() ? "Connected" : "Disconnected") + "</p>"; // Use isConnected()
-        s += "<p>Availability Topic: " + mqtt.getAvailabilityTopic() + "</p>";
-        s += "<p>State Topic: " + mqtt.getStateTopic() + "</p>";
-        s += "<p>Command Topic: " + mqtt.getCommandTopic() + "</p>";
-        s += "<p>Lamp Command Topic: " + mqtt.getLampCommandTopic() + "</p>";
-        s += "<p>Fan Command Topic: " + mqtt.getFanCommandTopic() + "</p>";
-        s += "<p>JSON Report Topic: " + mqtt.getJsonReportTopic() + "</p>";
-        s += "<h4>MQTT Log (<a href='/debug_clearlog'>Clear</a>)</h4>";
-        s += "<pre>" + mqtt.getLog() + "</pre>";
-
-        s += "<h3>DHT Sensor</h3>";
-        s += "<p>Status: " + dht.getStatus() + "</p>";
-        s += "<p>Temperature: " + String(dht.getTemperature(), 2) + " C</p>";
-        s += "<p>Humidity: " + String(dht.getHumidity(), 2) + " %</p>";
-        s += "<p>Last Read Time: " + String(dht.getReadTimeMicros()) + " us</p>";
-        s += "<p>Consecutive Errors: " + String(dht.getErrorCount()) + "</p>";
-        s += "<p>Total Errors: " + String(dht.getTotalErrorCount()) + "</p>";
-
-        s += "<h3>System</h3>";
-        s += "<p>Free Heap: " + String(ESP.getFreeHeap()) + " bytes</p>";
-        s += "<p>Chip ID: " + String(ESP.getChipId(), HEX) + "</p>";
-        s += "<p>SDK Version: " + String(ESP.getSdkVersion()) + "</p>";
-
-        server.send(200, "text/html", makePage("Debug", s));
+    void handleApiReset() {
+        // DynamicJsonDocument doc(128);
+        JsonDocument doc;
+        doc["success"] = true;
+        doc["message"] = "Configuration reset. Rebooting...";
+        
+        String jsonResponse;
+        serializeJson(doc, jsonResponse);
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.send(200, "application/json", jsonResponse);
+        
+        config.clear();
+        delay(1000);
+        ESP.restart();
     }
 
-     void handleDebugClearLog() {
+    void handleApiClearLog() {
         mqtt.clearLog();
-        // Redirect back to debug page
-        server.sendHeader("Location", "/debug", true);
-        server.send(302, "text/plain", "");
+        // DynamicJsonDocument doc(128);
+        JsonDocument doc;
+        doc["success"] = true;
+        doc["message"] = "Log cleared";
+        
+        String jsonResponse;
+        serializeJson(doc, jsonResponse);
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.send(200, "application/json", jsonResponse);
     }
 
+    // CORS preflight handler
+    void handleCORS() {
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+        server.send(204);
+    }
+
+    void handleLegacyRoot() {
+        server.send(200, "text/html", makeSPA());
+    }
 
     void handleNotFound() {
         if (wifi.isSettingMode()) {
@@ -1106,27 +1583,37 @@ private:
         }
     }
 
-
 public:
     WebServerHandler(ConfigManager& cfg, WiFiHandler& wf, MQTTHandler& mq, DHTSensor& dh) :
         server(80), config(cfg), wifi(wf), mqtt(mq), dht(dh) {}
 
     void setup() {
-        // Common routes
-        server.on("/", HTTP_GET, [this]() { this->handleRoot(); });
-        server.on("/settings", HTTP_GET, [this]() { this->handleSettings(); });
-        server.on("/save_settings", HTTP_GET, [this]() { this->handleSaveSettings(); });
-        server.on("/reboot", HTTP_GET, [this]() { this->handleReboot(); });
-        server.on("/reset", HTTP_GET, [this]() { this->handleReset(); });
-
-        if (!wifi.isSettingMode()) {
-            // Routes only available in normal operating mode
-            server.on("/control", HTTP_GET, [this]() { this->handleControl(); });
-            server.on("/set_control", HTTP_GET, [this]() { this->handleSetControl(); });
-            server.on("/debug", HTTP_GET, [this]() { this->handleDebug(); });
-            server.on("/debug_clearlog", HTTP_GET, [this]() { this->handleDebugClearLog(); });
-        }
-
+        // API endpoints
+        server.on("/api/status", HTTP_GET, [this]() { this->handleApiStatus(); });
+        server.on("/api/control", HTTP_GET, [this]() { this->handleApiControl(); });
+        server.on("/api/settings", HTTP_POST, [this]() { this->handleApiSettings(); });
+        server.on("/api/reboot", HTTP_GET, [this]() { this->handleApiReboot(); });
+        server.on("/api/reset", HTTP_GET, [this]() { this->handleApiReset(); });
+        server.on("/api/clear_log", HTTP_GET, [this]() { this->handleApiClearLog(); });
+        
+        // CORS support
+        server.on("/api/status", HTTP_OPTIONS, [this]() { this->handleCORS(); });
+        server.on("/api/control", HTTP_OPTIONS, [this]() { this->handleCORS(); });
+        server.on("/api/settings", HTTP_OPTIONS, [this]() { this->handleCORS(); });
+        server.on("/api/reboot", HTTP_OPTIONS, [this]() { this->handleCORS(); });
+        server.on("/api/reset", HTTP_OPTIONS, [this]() { this->handleCORS(); });
+        server.on("/api/clear_log", HTTP_OPTIONS, [this]() { this->handleCORS(); });
+        
+        // Main SPA
+        server.on("/", HTTP_GET, [this]() { this->handleLegacyRoot(); });
+        
+        // Legacy redirects (to maintain compatibility with bookmarks)
+        server.on("/control", HTTP_GET, [this]() { this->handleLegacyRoot(); });
+        server.on("/debug", HTTP_GET, [this]() { this->handleLegacyRoot(); });
+        server.on("/settings", HTTP_GET, [this]() { this->handleLegacyRoot(); });
+        server.on("/reboot", HTTP_GET, [this]() { this->handleLegacyRoot(); });
+        server.on("/reset", HTTP_GET, [this]() { this->handleLegacyRoot(); });
+        
         server.onNotFound([this]() { this->handleNotFound(); });
 
         server.begin();
