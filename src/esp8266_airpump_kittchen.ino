@@ -924,7 +924,7 @@ private:
         s += "<div class=\"buttons\">";
         s += "<a class=\"button is-danger is-light\" onclick=\"reboot()\"><span class=\"icon\"><i class=\"fas fa-power-off\"></i></span><span>Reboot</span></a>";
         s += "<a class=\"button is-warning is-light\" onclick=\"resetConfig()\"><span class=\"icon\"><i class=\"fas fa-trash\"></i></span><span>" + 
-             (wifi.isSettingMode() ? "Reset WiFi" : "Reset All") + "</span></a>";
+             String(wifi.isSettingMode() ? "Reset WiFi" : "Reset All") + "</span></a>";
         s += "</div></div></div></div>";
         s += "</nav>";
 
