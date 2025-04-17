@@ -2,12 +2,13 @@
 #define VERSION "0.6.0-oop" // Updated version
 
 #include <uptime_formatter.h>
-#include <ESP8266WiFi.h>
+
+#include <WiFi.h>         
+#include <WebServer.h>    
+#include <ESPmDNS.h>      
 #include <DNSServer.h>
 #include <WiFiClient.h>
 #include <EEPROM.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <dhtnew.h>
@@ -15,18 +16,18 @@
 #include <ArduinoJson.h>
 
 // --- Pin Definitions ---
-#define SWITCH1_PIN 1 // fan speed 1
-#define SWITCH2_PIN 3 // fan speed 2
-#define SWITCH3_PIN 5 // fan speed 3
-#define SWITCH4_PIN 4 // light
+#define SWITCH1_PIN 15  // fan speed 1 (was 1)
+#define SWITCH2_PIN 2   // fan speed 2 (was 3)
+#define SWITCH3_PIN 4   // fan speed 3 (was 5)
+#define SWITCH4_PIN 16  // light (was 4)
 
-#define BUTTON1_PIN 0
-#define BUTTON2_PIN 2
-#define BUTTON3_PIN 13
-#define BUTTON4_PIN 12
-#define BUTTON5_PIN 14
+#define BUTTON1_PIN 17  // (was 0)
+#define BUTTON2_PIN 5   // (was 2)
+#define BUTTON3_PIN 18  // (was 13)
+#define BUTTON4_PIN 19  // (was 12)
+#define BUTTON5_PIN 21  // (was 14)
 
-#define DHT22_PIN 16
+#define DHT22_PIN 22    // (was 16)
 
 // --- Constants ---
 const IPAddress AP_IP(192, 168, 97, 1);
@@ -201,7 +202,7 @@ public:
     WiFiHandler(ConfigManager& cfg) : config(cfg) {}
 
     bool setup() {
-        WiFi.hostname(config.hostname.c_str());
+        WiFi.setHostname(config.hostname.c_str()); 
         WiFi.mode(WIFI_STA);
         WiFi.setAutoReconnect(true);
 
@@ -299,7 +300,7 @@ public:
                 ssidListHtml += "\">";
                 ssidListHtml += WiFi.SSID(i);
                 ssidListHtml += "</option>";
-                 Serial.printf("  %d: %s (%d)%s\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), (WiFi.encryptionType(i) == ENC_TYPE_NONE ? " " : "*"));
+                 Serial.printf("  %d: %s (%d)%s\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), (WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? " " : "*"));
                 delay(10); // Small delay between scans
             }
         }
@@ -844,7 +845,7 @@ public:
 
 class WebServerHandler {
 private:
-    ESP8266WebServer server;
+    WebServer server;     
     ConfigManager& config;
     WiFiHandler& wifi;
     MQTTHandler& mqtt;
@@ -1400,6 +1401,7 @@ private:
         doc["mqtt_connected"] = mqtt.isConnected();
         doc["uptime"] = uptime_formatter::getUptime();
         doc["free_heap"] = ESP.getFreeHeap();
+
         
         // WiFi info
         JsonObject wifiObj = doc["wifi"].to<JsonObject>();
