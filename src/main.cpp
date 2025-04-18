@@ -1,8 +1,6 @@
 #define MQTT_MAX_PACKET_SIZE 2048
 #define VERSION "0.6.0-oop" // Updated version
 
-#include <uptime_formatter.h>
-
 #include <WiFi.h>         
 #include <WebServer.h>    
 #include <ESPmDNS.h>      
@@ -16,22 +14,23 @@
 #include <ArduinoJson.h>
 
 // --- Pin Definitions ---
-#define SWITCH1_PIN 15  // fan speed 1 (was 1)
-#define SWITCH2_PIN 2   // fan speed 2 (was 3)
-#define SWITCH3_PIN 4   // fan speed 3 (was 5)
-#define SWITCH4_PIN 16  // light (was 4)
 
-#define BUTTON1_PIN 17  // (was 0)
-#define BUTTON2_PIN 5   // (was 2)
-#define BUTTON3_PIN 18  // (was 13)
-#define BUTTON4_PIN 19  // (was 12)
-#define BUTTON5_PIN 21  // (was 14)
+#define SWITCH1_PIN 33  // fan speed 1 (was 1)
+#define SWITCH2_PIN 25  // fan speed 2 (was 3)
+#define SWITCH3_PIN 26  // fan speed 3 (was 5)
+#define SWITCH4_PIN 27  // light (was 4)
 
-#define DHT22_PIN 22    // (was 16)
+#define BUTTON1_PIN 18  // D19 (was 38)
+#define BUTTON2_PIN 19  // D18 (was 35)
+#define BUTTON3_PIN 5   // D5 (was 34)
+#define BUTTON4_PIN 17  // TX2 (was 27)
+#define BUTTON5_PIN 16  // RX2 (was 25)
+
+// #define DHT22_PIN 22    // (was 16)
 
 // --- Constants ---
 const IPAddress AP_IP(192, 168, 97, 1);
-const long DEBOUNCE_DELAY = 600;
+const long DEBOUNCE_DELAY = 100;
 const int REPORT_INTERVAL_MS = 25000; // Approx 25 seconds (5000 * 5ms delay in original reporter)
 const int DHT_ERROR_COUNT_MAX = 30;
 const int DHT_TOTAL_ERROR_COUNT_MAX = 2400;
@@ -753,11 +752,12 @@ public:
     }
 
     // Publishes the main state JSON
-    bool publishState(int fanSpeed, bool lightState, float temp, float hum, const String& wifi_ssid, const IPAddress& wifi_ip, int wifi_rssi) {
+    // bool publishState(int fanSpeed, bool lightState, float temp, float hum, const String& wifi_ssid, const IPAddress& wifi_ip, int wifi_rssi) {
+        bool publishState(int fanSpeed, bool lightState, const String& wifi_ssid, const IPAddress& wifi_ip, int wifi_rssi) {
         // DynamicJsonDocument stateDoc(512); // Deprecated
         JsonDocument stateDoc; // Use JsonDocument
-        stateDoc["temperature"] = round(temp * 10) / 10.0; // One decimal place
-        stateDoc["humidity"] = round(hum * 10) / 10.0;     // One decimal place
+        // stateDoc["temperature"] = round(temp * 10) / 10.0; // One decimal place
+        // stateDoc["humidity"] = round(hum * 10) / 10.0;     // One decimal place
         stateDoc["light"] = lightState ? "ON" : "OFF";
         stateDoc["fan_speed"] = fanSpeed; // Report raw speed 0-3
 
@@ -788,7 +788,8 @@ public:
     }
 
      // Publishes the legacy JSON report
-    bool publishJsonReport(int fanSpeed, bool lightState, const DHTSensor& dht, bool manualFan, unsigned long currentMillis, const String& wifi_ssid, const IPAddress& wifi_ip, int wifi_rssi) {
+    //bool publishJsonReport(int fanSpeed, bool lightState, const DHTSensor& dht, bool manualFan, unsigned long currentMillis, const String& wifi_ssid, const IPAddress& wifi_ip, int wifi_rssi) {
+        bool publishJsonReport(int fanSpeed, bool lightState, bool manualFan, unsigned long currentMillis, const String& wifi_ssid, const IPAddress& wifi_ip, int wifi_rssi) {
         // DynamicJsonDocument doc(1024); // Deprecated
         JsonDocument doc; // Use JsonDocument
 
@@ -797,13 +798,13 @@ public:
         doc["device_ip"] = IpAddress2String(wifi_ip);
         doc["location"] = config.location;
 
-        doc["dht22_temp"] = round(dht.getTemperature() * 10) / 10.0;
-        doc["dht22_hum"] = round(dht.getHumidity() * 10) / 10.0;
-        doc["dht22_ok"] = dht.isReadingValid();
-        doc["dht22_error"] = dht.getErrorCount();
-        doc["dht22_timing"] = dht.getReadTimeMicros(); // Report micros now
-        doc["dht22_error_total"] = dht.getTotalErrorCount();
-        doc["dht22_status"] = dht.getStatus();
+        // doc["dht22_temp"] = round(dht.getTemperature() * 10) / 10.0;
+        // doc["dht22_hum"] = round(dht.getHumidity() * 10) / 10.0;
+        // doc["dht22_ok"] = dht.isReadingValid();
+        // doc["dht22_error"] = dht.getErrorCount();
+        // doc["dht22_timing"] = dht.getReadTimeMicros(); // Report micros now
+        // doc["dht22_error_total"] = dht.getTotalErrorCount();
+        // doc["dht22_status"] = dht.getStatus();
 
         doc["manual_fan"] = manualFan;
         doc["fan"] = fanSpeed;
@@ -849,7 +850,7 @@ private:
     ConfigManager& config;
     WiFiHandler& wifi;
     MQTTHandler& mqtt;
-    DHTSensor& dht;
+    // DHTSensor& dht;
     
     // Store values directly instead of pointer to controller
     int currentFanSpeed = 0;
@@ -873,7 +874,7 @@ private:
         String s = "<footer class=\"footer p-3 is-size-7\">";
         s += "<div class=\"content has-text-centered\">";
         s += "<p><strong>" + config.hostname + "</strong> | Version: " + String(VERSION) + "</p>";
-        s += "<p>Uptime: <span id=\"uptime\">" + uptime_formatter::getUptime() + "</span></p>";
+        s += "<p>Uptime: <span id=\"uptime\"> todo </span></p>";
         s += "<div class=\"columns is-mobile is-centered\">";
         s += "<div class=\"column is-narrow\"><div class=\"card footer-card\"><div class=\"card-content p-2\">";
         s += "<p class=\"has-text-centered\"><span class=\"icon\"><i class=\"fas fa-wifi\"></i></span> WiFi: <span id=\"wifi-status\">" + 
@@ -942,8 +943,8 @@ private:
         s += "<table class=\"table is-fullwidth\">";
         s += "<tr><td>Fan Speed</td><td id=\"status-fan\">" + String(currentFanSpeed) + "</td></tr>";
         s += "<tr><td>Light</td><td id=\"status-light\">" + String(currentLightState ? "ON" : "OFF") + "</td></tr>";
-        s += "<tr><td>Temperature</td><td id=\"status-temp\">" + String(dht.getTemperature(), 1) + " °C</td></tr>";
-        s += "<tr><td>Humidity</td><td id=\"status-humidity\">" + String(dht.getHumidity(), 1) + " %</td></tr>";
+        s += "<tr><td>Temperature</td><td id=\"status-temp\">todo °C</td></tr>";
+        s += "<tr><td>Humidity</td><td id=\"status-humidity\">todo %</td></tr>";
         s += "<tr><td>IP Address</td><td id=\"status-ip\">" + IpAddress2String(wifi.getLocalIp()) + "</td></tr>";
         s += "</table>";
         s += "</div>";
@@ -1049,12 +1050,12 @@ private:
             s += "<h4 class=\"title is-5\">DHT Sensor</h4>";
             s += "<div class=\"table-container\">";
             s += "<table class=\"table is-fullwidth is-striped\">";
-            s += "<tr><td>Status</td><td id=\"dht-status\">" + dht.getStatus() + "</td></tr>";
-            s += "<tr><td>Temperature</td><td id=\"dht-temp\">" + String(dht.getTemperature(), 2) + " °C</td></tr>";
-            s += "<tr><td>Humidity</td><td id=\"dht-hum\">" + String(dht.getHumidity(), 2) + " %</td></tr>";
-            s += "<tr><td>Last Read Time</td><td id=\"dht-read-time\">" + String(dht.getReadTimeMicros()) + " μs</td></tr>";
-            s += "<tr><td>Consecutive Errors</td><td id=\"dht-err\">" + String(dht.getErrorCount()) + "</td></tr>";
-            s += "<tr><td>Total Errors</td><td id=\"dht-total-err\">" + String(dht.getTotalErrorCount()) + "</td></tr>";
+            s += "<tr><td>Status</td><td id=\"dht-status\">todo </td></tr>";
+            s += "<tr><td>Temperature</td><td id=\"dht-temp\">todo °C</td></tr>";
+            s += "<tr><td>Humidity</td><td id=\"dht-hum\">todo %</td></tr>";
+            s += "<tr><td>Last Read Time</td><td id=\"dht-read-time\">todo μs</td></tr>";
+            s += "<tr><td>Consecutive Errors</td><td id=\"dht-err\">todo </td></tr>";
+            s += "<tr><td>Total Errors</td><td id=\"dht-total-err\">todo </td></tr>";
             s += "</table>";
             s += "</div>";
             
@@ -1062,7 +1063,7 @@ private:
             s += "<div class=\"table-container\">";
             s += "<table class=\"table is-fullwidth is-striped\">";
             s += "<tr><td>Free Heap</td><td id=\"free-heap\">" + String(ESP.getFreeHeap()) + " bytes</td></tr>";
-            s += "<tr><td>Chip ID</td><td>" + String(ESP.getChipId(), HEX) + "</td></tr>";
+            s += "<tr><td>Chip ID</td><td>todo</td></tr>";
             s += "<tr><td>SDK Version</td><td>" + String(ESP.getSdkVersion()) + "</td></tr>";
             s += "</table>";
             s += "</div>";
@@ -1394,12 +1395,12 @@ private:
         // DynamicJsonDocument doc(1024);
         JsonDocument doc;
 
-        doc["temperature"] = dht.getTemperature();
-        doc["humidity"] = dht.getHumidity();
+        // doc["temperature"] = dht.getTemperature();
+        // doc["humidity"] = dht.getHumidity();
         doc["fan_speed"] = currentFanSpeed;
         doc["light"] = currentLightState;
         doc["mqtt_connected"] = mqtt.isConnected();
-        doc["uptime"] = uptime_formatter::getUptime();
+        doc["uptime"] = "need to fix";
         doc["free_heap"] = ESP.getFreeHeap();
 
         
@@ -1410,11 +1411,11 @@ private:
         wifiObj["rssi"] = wifi.getRssi();
         
         // DHT info
-        JsonObject dhtObj = doc["dht"].to<JsonObject>();
-        dhtObj["status"] = dht.getStatus();
-        dhtObj["read_time"] = dht.getReadTimeMicros();
-        dhtObj["error_count"] = dht.getErrorCount();
-        dhtObj["total_error_count"] = dht.getTotalErrorCount();
+        // JsonObject dhtObj = doc["dht"].to<JsonObject>();
+        // dhtObj["status"] = dht.getStatus();
+        // dhtObj["read_time"] = dht.getReadTimeMicros();
+        // dhtObj["error_count"] = dht.getErrorCount();
+        // dhtObj["total_error_count"] = dht.getTotalErrorCount();
         
         // MQTT log in debug mode
         doc["mqtt_log"] = mqtt.getLog();
@@ -1586,8 +1587,9 @@ private:
     }
 
 public:
-    WebServerHandler(ConfigManager& cfg, WiFiHandler& wf, MQTTHandler& mq, DHTSensor& dh) :
-        server(80), config(cfg), wifi(wf), mqtt(mq), dht(dh) {}
+    // WebServerHandler(ConfigManager& cfg, WiFiHandler& wf, MQTTHandler& mq, DHTSensor& dh) :
+    WebServerHandler(ConfigManager& cfg, WiFiHandler& wf, MQTTHandler& mq) :
+        server(80), config(cfg), wifi(wf), mqtt(mq) {}
 
     void setup() {
         // API endpoints
@@ -1645,7 +1647,7 @@ class AirPumpController : public ControllerInterface {
 private:
     ConfigManager configManager;
     WiFiHandler wifiHandler;
-    DHTSensor dhtSensor;
+    // DHTSensor dhtSensor;
     MQTTHandler mqttHandler;
     WebServerHandler webServerHandler;
 
@@ -1723,9 +1725,10 @@ public:
     // Constructor initializes members
     AirPumpController() :
         wifiHandler(configManager),
-        dhtSensor(DHT22_PIN),
+        // dhtSensor(DHT22_PIN),
         mqttHandler(wifiClient, configManager),
-        webServerHandler(configManager, wifiHandler, mqttHandler, dhtSensor),
+        // webServerHandler(configManager, wifiHandler, mqttHandler, dhtSensor),
+        webServerHandler(configManager, wifiHandler, mqttHandler),
         buttonFanOff(BUTTON1_PIN), buttonFan1(BUTTON2_PIN), buttonFan2(BUTTON3_PIN),
         buttonFan3(BUTTON4_PIN), buttonLight(BUTTON5_PIN),
         switchFan1(SWITCH1_PIN), switchFan2(SWITCH2_PIN), switchFan3(SWITCH3_PIN),
@@ -1781,14 +1784,16 @@ public:
 
         Serial.println("Reporting state...");
 
-        float temp = dhtSensor.getTemperature();
-        float hum = dhtSensor.getHumidity();
+        // float temp = dhtSensor.getTemperature();
+        // float hum = dhtSensor.getHumidity();
         String ssid = wifiHandler.getSsid();
         IPAddress ip = wifiHandler.getLocalIp();
         int rssi = wifiHandler.getRssi();
 
-        mqttHandler.publishState(currentFanSpeed, currentLightState, temp, hum, ssid, ip, rssi);
-        mqttHandler.publishJsonReport(currentFanSpeed, currentLightState, dhtSensor, manualFanMode, millis(), ssid, ip, rssi);
+        // mqttHandler.publishState(currentFanSpeed, currentLightState, temp, hum, ssid, ip, rssi);
+        mqttHandler.publishState(currentFanSpeed, currentLightState, ssid, ip, rssi);
+        // mqttHandler.publishJsonReport(currentFanSpeed, currentLightState, dhtSensor, manualFanMode, millis(), ssid, ip, rssi);
+        mqttHandler.publishJsonReport(currentFanSpeed, currentLightState, manualFanMode, millis(), ssid, ip, rssi);
     }
 
     virtual int getFanSpeed() const override {
@@ -1808,7 +1813,7 @@ public:
         configManager.load();
 
         wifiHandler.setup();
-        dhtSensor.setup();
+        // dhtSensor.setup();
         mqttHandler.setup();
 
         buttonFanOff.setup();
@@ -1842,7 +1847,7 @@ public:
         handleButtons();
 
         if (millis() - lastSensorReadTime > 2000) {
-            dhtSensor.read();
+            // dhtSensor.read();
             lastSensorReadTime = millis();
         }
 
