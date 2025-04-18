@@ -1,5 +1,20 @@
 #define MQTT_MAX_PACKET_SIZE 2048
-#define VERSION "0.6.0-oop" // Updated version
+#define VERSION "0.7.0-multicore" // Updated version to reflect multicore support
+
+// Core assignment definitions
+#define CORE_COMM 0  // Communication tasks (WiFi, MQTT, etc.) on Core 0
+#define CORE_UI 1    // UI and local control tasks on Core 1
+
+// Task priorities
+#define PRIORITY_HIGH 2
+#define PRIORITY_MEDIUM 1
+#define PRIORITY_LOW 0
+
+// Task stack sizes
+#define STACK_SIZE_COMM 8192
+#define STACK_SIZE_UI 4096
+#define STACK_SIZE_SENSOR 4096
+#define STACK_SIZE_WEB 8192
 
 #include <WiFi.h>         
 #include <WebServer.h>    
@@ -12,6 +27,10 @@
 #include <dhtnew.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+// Include ESP32-specific task handling
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
 
 // --- Pin Definitions ---
 
@@ -25,8 +44,6 @@
 #define BUTTON3_PIN 5   // D5 (was 34)
 #define BUTTON4_PIN 17  // TX2 (was 27)
 #define BUTTON5_PIN 16  // RX2 (was 25)
-
-// #define DHT22_PIN 22    // (was 16)
 
 // --- Constants ---
 const IPAddress AP_IP(192, 168, 97, 1);
@@ -1721,6 +1738,19 @@ private:
         }
     }
 
+    // Thread safety
+    void lockState() {
+        if (stateMutex != NULL) {
+            xSemaphoreTake(stateMutex, portMAX_DELAY);
+        }
+    }
+
+    void unlockState() {
+        if (stateMutex != NULL) {
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
 public:
     // Constructor initializes members
     AirPumpController() :
@@ -1740,8 +1770,12 @@ public:
 
     // AirPumpController implementation of ControllerInterface methods
     virtual void setFanSpeed(int speed, bool manual = false) override {
+        lockState();
         // Existing implementation
-        if (speed < 0 || speed > 3) return;
+        if (speed < 0 || speed > 3) {
+            unlockState();
+            return;
+        }
 
         if (manual) {
             manualFanMode = true;
@@ -1764,9 +1798,11 @@ public:
             // Update WebServerHandler's stored values
             webServerHandler.updateValues(currentFanSpeed, currentLightState);
         }
+        unlockState();
     }
 
     virtual void setLight(bool state) override {
+        lockState();
         // Existing implementation
         if (state != currentLightState) {
             Serial.println("Setting Light to " + String(state ? "ON" : "OFF"));
@@ -1776,46 +1812,124 @@ public:
             // Update WebServerHandler's stored values
             webServerHandler.updateValues(currentFanSpeed, currentLightState);
         }
+        unlockState();
     }
 
     virtual void reportState() override {
+        // No need to lock, as we're only reading and accessing MQTT
         // Existing implementation
         if (!wifiHandler.isConnected()) return;
 
         Serial.println("Reporting state...");
 
-        // float temp = dhtSensor.getTemperature();
-        // float hum = dhtSensor.getHumidity();
         String ssid = wifiHandler.getSsid();
         IPAddress ip = wifiHandler.getLocalIp();
         int rssi = wifiHandler.getRssi();
 
-        // mqttHandler.publishState(currentFanSpeed, currentLightState, temp, hum, ssid, ip, rssi);
         mqttHandler.publishState(currentFanSpeed, currentLightState, ssid, ip, rssi);
-        // mqttHandler.publishJsonReport(currentFanSpeed, currentLightState, dhtSensor, manualFanMode, millis(), ssid, ip, rssi);
         mqttHandler.publishJsonReport(currentFanSpeed, currentLightState, manualFanMode, millis(), ssid, ip, rssi);
     }
 
     virtual int getFanSpeed() const override {
-        return currentFanSpeed;
+        return currentFanSpeed; // Atomic read, no lock needed
     }
 
     virtual bool isLightOn() const override {
-        return currentLightState;
+        return currentLightState; // Atomic read, no lock needed
     }
 
-    void setup() {
+    void setupMultiCore() {
         Serial.begin(115200);
-        Serial.println("\n\n--- ESP8266 AirPump Controller ---");
+        Serial.println("\n\n--- ESP32 AirPump Controller (Multi-Core) ---");
         Serial.println("Version: " + String(VERSION));
+        Serial.println("Setting up multi-core operation...");
 
+        // Create a mutex for thread safety
+        stateMutex = xSemaphoreCreateMutex();
+        if (stateMutex == NULL) {
+            Serial.println("ERROR: Failed to create state mutex!");
+        }
+
+        // Basic setup
         configManager.begin();
         configManager.load();
 
-        wifiHandler.setup();
-        // dhtSensor.setup();
-        mqttHandler.setup();
+        // Create the tasks on appropriate cores
+        xTaskCreatePinnedToCore(
+            commTask,           // Function to implement the task
+            "commTask",         // Name of the task
+            STACK_SIZE_COMM,    // Stack size in words
+            this,               // Task input parameter
+            PRIORITY_HIGH,      // Priority of the task
+            &commTaskHandle,    // Task handle
+            CORE_COMM);         // Core where the task should run
 
+        xTaskCreatePinnedToCore(
+            uiTask,             // Function to implement the task
+            "uiTask",           // Name of the task
+            STACK_SIZE_UI,      // Stack size in words
+            this,               // Task input parameter
+            PRIORITY_MEDIUM,    // Priority of the task
+            &uiTaskHandle,      // Task handle
+            CORE_UI);           // Core where the task should run
+
+        xTaskCreatePinnedToCore(
+            webTask,            // Function to implement the task
+            "webTask",          // Name of the task
+            STACK_SIZE_WEB,     // Stack size in words
+            this,               // Task input parameter
+            PRIORITY_MEDIUM,    // Priority of the task
+            &webTaskHandle,     // Task handle
+            CORE_UI);           // Core where the task should run
+
+        xTaskCreatePinnedToCore(
+            sensorTask,         // Function to implement the task
+            "sensorTask",       // Name of the task
+            STACK_SIZE_SENSOR,  // Stack size in words
+            this,               // Task input parameter
+            PRIORITY_LOW,       // Priority of the task
+            &sensorTaskHandle,  // Task handle
+            CORE_COMM);         // Core where the task should run
+
+        Serial.println("Multi-core tasks created successfully");
+    }
+
+    // Original setup for backwards compatibility
+    void setup() {
+        // Use setupMultiCore() for ESP32
+        setupMultiCore();
+    }
+
+    // Empty loop since tasks handle everything
+    void loop() {
+        // Empty - the FreeRTOS tasks handle everything
+        delay(1000); // Just to prevent watchdog issues
+    }
+
+    // Methods for tasks
+    void runCommTask() {
+        wifiHandler.setup();
+        mqttHandler.setup();
+        while(true) {
+            wifiHandler.handle();
+            mqttHandler.loop();
+            
+            // Process any received MQTT messages
+            processMqttMessages();
+            
+            // Report state periodically
+            static unsigned long lastReportTime = 0;
+            if (millis() - lastReportTime > REPORT_INTERVAL_MS) {
+                reportState();
+                lastReportTime = millis();
+            }
+            
+            delay(10); // Small delay to prevent hogging the CPU
+        }
+    }
+
+    void runUITask() {
+        // Set up buttons and switches
         buttonFanOff.setup();
         buttonFan1.setup();
         buttonFan2.setup();
@@ -1826,37 +1940,31 @@ public:
         switchFan3.setup();
         switchLight.setup();
 
+        // Set initial states
         setFanSpeed(0, true);
         setLight(false);
-
-        webServerHandler.setup();
-
-        Serial.println("Setup complete.");
-        lastReportTime = millis();
-        lastSensorReadTime = millis();
+        
+        while(true) {
+            handleButtons();
+            delay(10); // Small delay to prevent hogging the CPU
+        }
     }
 
-    void loop() {
-        wifiHandler.handle();
-        mqttHandler.loop();
-        webServerHandler.handleClient();
-        
-        // Process any received MQTT messages
-        processMqttMessages();
-        
-        handleButtons();
+    void runWebTask() {
+        webServerHandler.setController(this);
+        webServerHandler.setup();
+        while(true) {
+            webServerHandler.handleClient();
+            delay(10); // Small delay to prevent hogging the CPU
+        }
+    }
 
-        if (millis() - lastSensorReadTime > 2000) {
+    void runSensorTask() {
+        // dhtSensor.setup();
+        while(true) {
             // dhtSensor.read();
-            lastSensorReadTime = millis();
+            delay(2000); // Read every 2 seconds
         }
-
-        if (millis() - lastReportTime > REPORT_INTERVAL_MS) {
-            reportState();
-            lastReportTime = millis();
-        }
-
-        delay(5);
     }
 
     void handleButtons() {
@@ -1889,6 +1997,31 @@ public:
     }
 };
 
+// --- Task Function Implementations ---
+void commTask(void * parameter) {
+    AirPumpController* controller = (AirPumpController*)parameter;
+    Serial.println("Communication task started on core " + String(xPortGetCoreID()));
+    controller->runCommTask();
+}
+
+void uiTask(void * parameter) {
+    AirPumpController* controller = (AirPumpController*)parameter;
+    Serial.println("UI task started on core " + String(xPortGetCoreID()));
+    controller->runUITask();
+}
+
+void webTask(void * parameter) {
+    AirPumpController* controller = (AirPumpController*)parameter;
+    Serial.println("Web server task started on core " + String(xPortGetCoreID()));
+    controller->runWebTask();
+}
+
+void sensorTask(void * parameter) {
+    AirPumpController* controller = (AirPumpController*)parameter;
+    Serial.println("Sensor task started on core " + String(xPortGetCoreID()));
+    controller->runSensorTask();
+}
+
 // --- Global Setup and Loop ---
 AirPumpController controller;
 
@@ -1897,6 +2030,8 @@ void setup() {
 }
 
 void loop() {
+    // On the ESP32, our main loop does very little since the tasks handle everything
+    // The controller.loop() is mostly empty as well, just a watchdog delay
     controller.loop();
 }
 
